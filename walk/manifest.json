@@ -3,22 +3,22 @@
  "lightmaps": {
   "A_floor": 0.5488,
   "A_shell": 6.1641,
-  "A_parts": 1.6455,
+  "A_parts": 1.6338,
   "A_units": 3.1719,
   "A_inner": 2.502,
-  "A_misc": 1.6357,
+  "A_misc": 1.6348,
   "A_out": 5.082
  },
  "sizes": {
-  "kitchen.glb": 894836,
-  "env.hdr": 1278529,
+  "kitchen.glb": 895188,
+  "env.hdr": 1278616,
   "garden.jpg": 200347,
-  "A_floor.jpg": 144500,
-  "A_shell.jpg": 171247,
-  "A_parts.jpg": 425143,
-  "A_units.jpg": 307320,
-  "A_inner.jpg": 276443,
-  "A_misc.jpg": 370638,
-  "A_out.jpg": 59817
+  "A_floor.jpg": 144472,
+  "A_shell.jpg": 171249,
+  "A_parts.jpg": 425617,
+  "A_units.jpg": 307313,
+  "A_inner.jpg": 276428,
+  "A_misc.jpg": 370635,
+  "A_out.jpg": 59818
  }
 }
