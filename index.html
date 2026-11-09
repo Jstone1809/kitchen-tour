@@ -75,7 +75,7 @@ document.querySelectorAll(isTouch ? '.t-desk' : '.t-touch').forEach((e) => e.sty
 // ------------------------------------------------------------------ renderer / scene / camera
 const canvas = $('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isTouch ? 2 : 1.5));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isTouch ? 3 : 2));   // full device resolution (MSAA on)
 renderer.toneMapping = THREE.AgXToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -102,7 +102,10 @@ function setProg(name, loaded) {
   let tot = 0, got = 0;
   for (const k in manifest.sizes) { tot += manifest.sizes[k]; got += Math.min(prog[k] || 0, manifest.sizes[k]); }
   const p = Math.round(100 * got / Math.max(1, tot));
-  $('fill').style.width = p + '%'; $('pct').textContent = p + '%  (' + (tot / 1e6).toFixed(1) + ' MB)';
+  const stage = (n) => n === 'kitchen.glb' ? 'model' : n === 'env.hdr' ? 'reflections' : n.startsWith('A_') ? 'baked lighting' : 'textures';
+  const todo = Object.keys(manifest.sizes).filter((k) => (prog[k] || 0) < manifest.sizes[k]).map(stage);
+  const st = todo.length ? [...new Set(todo)].join(', ') : 'preparing';
+  $('fill').style.width = p + '%'; $('pct').textContent = p + '% of ' + (tot / 1e6).toFixed(1) + ' MB - ' + st;
 }
 const texLoader = new THREE.TextureLoader();
 function loadTex(name) {
@@ -149,20 +152,30 @@ const RT = {
   led: () => emit(bb(3000), 6), downlight: () => emit(bb(4000), 8), cab_glow: () => emit(bb(2700), 1.6), hood_lamp: () => emit(bb(3200), 5),
   display_orange: () => emit([1, 0.33, 0.05], 3), display_white: () => emit([0.8, 0.86, 1], 3), hob_touch: () => emit([0.7, 0.72, 0.78], 1)
 };
-const MUL = { drawer_box: 1.7, wood_insert: 1.4, bin_grey: 1.3, pan_steel: 1.0 };   // brighten insides of drawers (baked closed)
+const MUL = { drawer_box: 1.5, wood_insert: 1.3, bin_grey: 1.2 };   // brighten insides of drawers (baked closed)
 const matCache = {};
-function bakedMat(atlas, mat, tex, k, envMap) {
+// baked lighting only (no IBL diffuse on top, or it would be lit twice); keep the realtime env reflections
+const LM_CHUNK = THREE.ShaderChunk.lights_fragment_maps.replace('iblIrradiance += getIBLIrradiance( geometryNormal );', '');
+// lightmaps hold lighting only; albedo = material colour or a full-resolution texture
+function bakedMat(atlas, mat, lm, k, envMap, texMaps) {
   const key = atlas + '|' + mat;
   if (matCache[key]) return matCache[key];
+  const info = (manifest.materials || {})[mat] || { c: [0.7, 0.7, 0.7], r: 0.5, m: 0 };
+  const col = new THREE.Color().setRGB(info.c[0], info.c[1], info.c[2], THREE.LinearSRGBColorSpace);
+  if (atlas === 'A_parts' && MUL[mat]) k *= MUL[mat];
+  let map = null;
+  if (info.tex && texMaps[info.tex]) { map = texMaps[info.tex]; }
+  const sp = SPEC[mat];
   let m;
-  const sp = SPEC[mat]; if (atlas === 'A_parts' && MUL[mat]) k *= MUL[mat];
   if (sp) {
-    m = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: k,
+    m = new THREE.MeshStandardMaterial({ color: col, map, lightMap: lm, lightMapIntensity: k * Math.PI,
       roughness: sp[0], metalness: 0, envMap, envMapIntensity: sp[1] });
+    m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_maps>', LM_CHUNK); };
+    m.customProgramCacheKey = () => 'lmonly';
   } else {
-    m = new THREE.MeshBasicMaterial({ map: tex }); m.color.setScalar(k);
+    m = new THREE.MeshBasicMaterial({ color: col, map, lightMap: lm, lightMapIntensity: k * Math.PI });
   }
-  if (mat === 'tray_anthracite') (m.emissive || m.color).multiply(new THREE.Color(1.3, 1.08, 0.85));   // neutralise the blue cast of the dark trays
+  if (mat === 'tray_anthracite') m.color.multiply(new THREE.Color(1.15, 1.04, 0.9));
   return (matCache[key] = m);
 }
 
@@ -186,7 +199,8 @@ const INFO = {
   'Boiler housing': 'BH 640 boiler housing. The wall-hung boiler stays.',
   'B1 corner': 'B1 1200 blind corner at the dining end (600 door). The fitter pack recommends a corner pull-out here too.',
   'Sink base': 'B8 600 sink base on the existing plumbing (sink centre 1550).',
-  'B2 drawers': 'B2 600: 3 drawers (1 shallow + 2 deep) at the dining end.'
+  'B2 drawers': 'B2 600: 3 drawers (1 shallow + 2 deep) at the dining end.',
+  'B3': 'B3 500: 3 drawers (1 shallow + 2 deep), matching B2 (was a 1-door base).'
 };
 const ease = (x) => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -213,7 +227,9 @@ function partE(p) {
 }
 function toggle(p, force) {
   if (p.link) { const u = links[p.link]; u.target = force !== undefined ? force : (u.target ? 0 : 1); return u.target; }
-  p.target = force !== undefined ? force : (p.target ? 0 : 1); return p.target;
+  p.target = force !== undefined ? force : (p.target ? 0 : 1);
+  if (!p.target) for (const q of parts) if (q.outer === p) q.target = 0;   // inner drawer closes with its outer drawer
+  return p.target;
 }
 
 // ------------------------------------------------------------------ load everything
@@ -230,6 +246,7 @@ let root = null, pickables = [];
     const texP = {};
     for (const a in manifest.lightmaps) texP[a] = loadTex(a + '.jpg');
     const gardenP = loadTex('garden.jpg');
+    const albP = {}; for (const k in (manifest.textures || {})) albP[k] = loadTex(manifest.textures[k]);
     const draco = new DRACOLoader(); draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/libs/draco/gltf/');
     const gl = new GLTFLoader(); gl.setDRACOLoader(draco);
     const glbP = fetchProgress(BASE + 'kitchen.glb', 'kitchen.glb').then((b) => b.arrayBuffer()).then((buf) => new Promise((res, rej) => gl.parse(buf, BASE, res, rej)));
@@ -238,7 +255,11 @@ let root = null, pickables = [];
     const envMap = pmrem.fromEquirectangular(envTex).texture;
     scene.environment = envMap;
     const tex = {};
-    for (const a in texP) { const t = await texP[a]; t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.needsUpdate = true; tex[a] = t; }
+    const aniso = renderer.capabilities.getMaxAnisotropy();
+    for (const a in texP) { const t = await texP[a]; t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso; t.channel = 0; t.needsUpdate = true; tex[a] = t; }
+    const texMaps = {};
+    for (const k in albP) { const t = await albP[k]; t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.channel = (k === 'floor_col.png') ? 0 : 1; t.needsUpdate = true; texMaps[k] = t; }
     garden.colorSpace = THREE.SRGBColorSpace;
     root = gltf.scene; root.position.z = W;             // glTF z = room z - W  ->  room coordinates (x along, z across, y up)
     scene.add(root);
@@ -246,7 +267,7 @@ let root = null, pickables = [];
       if (o.isMesh) {
         const nm = (o.material && o.material.name) || '';
         const bits = nm.split('|');
-        if (bits[0] === 'BK') o.material = bakedMat(bits[1], bits[2], tex[bits[1]], manifest.lightmaps[bits[1]], envMap);
+        if (bits[0] === 'BK') o.material = bakedMat(bits[1], bits[2], tex[bits[1]], manifest.lightmaps[bits[1]], envMap, texMaps);
         else if (bits[0] === 'RT') {
           const k = bits[1];
           if (k === 'garden') { const m = new THREE.MeshBasicMaterial({ map: garden, side: THREE.DoubleSide }); m.color.setScalar(1.7); o.material = m; }
@@ -261,6 +282,7 @@ let root = null, pickables = [];
         const p = { node: o, kind: ud.kind, amount: ud.amount, hinge: ud.hinge, link: ud.link || '', label: ud.label, info: ud.info || '',
                     q0: o.quaternion.clone(), p0: o.position.clone(), t: 0, target: 0, order: ud.order || 0 };
         if (ud.kind === 'tray') p.openPos = new THREE.Vector3().fromArray(ud.open_pos);
+        for (let a = o.parent; a; a = a.parent) if (a.userData && a.userData.part) { p.outer = a.userData.part; break; }
         o.userData.part = p; parts.push(p);
         if (p.link) { (links[p.link] = links[p.link] || { s: 0, target: 0, parts: [] }).parts.push(p); }
       }
@@ -284,8 +306,8 @@ const BOX = [   // [x0, x1, z0, z1] in room metres (x along the room from the di
   [L - 0.62, L, 0.60, 2.18],                          // sink run
   [3.30, L, W - 0.62, W],                             // washing-machine run
   [1.25, 2.45, 0.55, 1.30],                           // table
-  [1.31, 1.79, 0.19, 0.67], [1.91, 2.39, 0.19, 0.67], // chairs (window side)
-  [1.31, 1.79, 1.18, 1.66], [1.91, 2.39, 1.18, 1.66]  // chairs (tall-unit side)
+  [1.31, 1.79, 0.16, 0.70], [1.91, 2.39, 0.16, 0.70], // chairs (window side)
+  [1.31, 1.79, 1.15, 1.69], [1.91, 2.39, 1.15, 1.69]  // chairs (tall-unit side)
 ];
 const SEG = [[2.51, W - 0.04, 2.51 + 0.73 * Math.cos(0.35), W - 0.04 - 0.73 * Math.sin(0.35), 0.03]];   // hall door leaf (ajar)
 const pos = new THREE.Vector2(2.92, 2.28); let yaw = 0, pitch = 0;
@@ -424,7 +446,8 @@ function frame() {
 }
 // test hooks (headless screenshots)
 window.__kitchen = { parts, links, gotoStart, toggle, setView: (x, z, y_, p_) => { pos.set(x, z); yaw = y_; pitch = p_ || 0; },
-  openAll: () => $('bAll').click(), pick, getPos: () => [pos.x, pos.y] };
+  openAll: () => $('bAll').click(), pick, getPos: () => [pos.x, pos.y],
+  hit: (x, y) => { ndc.set(x / window.innerWidth * 2 - 1, -(y / window.innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); return ray.intersectObjects(pickables, false).slice(0, 3).map(h => [h.object.material.name || h.object.name, h.object.name, h.point.x.toFixed(3), h.point.y.toFixed(3), h.point.z.toFixed(3)]); } };
 requestAnimationFrame(frame);
 </script>
 </body></html>
