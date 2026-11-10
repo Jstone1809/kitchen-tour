@@ -3,10 +3,10 @@
  "lightmaps": {
   "A_floor": 1.0322,
   "A_shell": 8.9531,
-  "A_parts": 1.9404,
-  "A_units": 3.7734,
-  "A_inner": 2.9941,
-  "A_misc": 5.8047,
+  "A_parts": 1.9424,
+  "A_units": 3.8398,
+  "A_inner": 2.9492,
+  "A_misc": 5.4922,
   "A_out": 8.8125
  },
  "materials": {
@@ -637,15 +637,15 @@
   "oak_col.png": "tex_oak.jpg"
  },
  "sizes": {
-  "kitchen.glb": 1068352,
-  "env.hdr": 1288112,
+  "kitchen.glb": 1061524,
+  "env.hdr": 1290367,
   "garden.jpg": 200347,
   "A_floor.jpg": 171299,
-  "A_shell.jpg": 355123,
-  "A_parts.jpg": 2976437,
-  "A_units.jpg": 1898255,
-  "A_inner.jpg": 553664,
-  "A_misc.jpg": 990004,
+  "A_shell.jpg": 354881,
+  "A_parts.jpg": 2949580,
+  "A_units.jpg": 1880893,
+  "A_inner.jpg": 551015,
+  "A_misc.jpg": 993486,
   "A_out.jpg": 103869,
   "tex_floor.jpg": 662253,
   "tex_quartz.jpg": 1129569,
